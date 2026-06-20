@@ -31,13 +31,18 @@ impl fmt::Display for TagError {
 
 impl std::error::Error for TagError {}
 
-/// Normalized, non-empty tag name (private inner newtype).
+/// A routing and filtering label associating a node with a behavioral domain.
+///
+/// `CortexTag` is inert data — it carries no behavior of its own.
+/// The Cortex layer reads these tags to know which rules apply to a given
+/// Neuron or Fiber.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-struct TagName(String);
+pub struct CortexTag(String);
 
-impl TagName {
-    fn try_from_str(name: &str) -> Result<Self, TagError> {
+impl CortexTag {
+    /// Creates a new `CortexTag` after validating and normalizing the name.
+    pub fn try_new(name: &str) -> Result<Self, TagError> {
         const MAX_LEN: usize = 256;
         let trimmed = name.trim();
         if trimmed.is_empty() {
@@ -53,26 +58,10 @@ impl TagName {
         }
         Ok(Self(trimmed.to_owned()))
     }
-}
-
-/// A routing and filtering label associating a node with a behavioral domain.
-///
-/// `CortexTag` is inert data — it carries no behavior of its own.
-/// The Cortex layer reads these tags to know which rules apply to a given
-/// Neuron or Fiber.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct CortexTag(TagName);
-
-impl CortexTag {
-    /// Creates a new `CortexTag` after validating and normalizing the name.
-    pub fn try_new(name: &str) -> Result<Self, TagError> {
-        Ok(Self(TagName::try_from_str(name)?))
-    }
 
     /// Returns the tag name as a string slice.
     pub fn as_str(&self) -> &str {
-        &self.0.0
+        &self.0
     }
 }
 

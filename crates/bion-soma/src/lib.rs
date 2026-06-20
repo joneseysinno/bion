@@ -15,7 +15,7 @@ pub mod polarity;
 pub mod signal;
 pub mod tag;
 
-pub use id::{IdGen, NeuronId, SequentialIdGen, UuidIdGen};
+pub use id::{FiberId, IdGen, NeuronId, SequentialIdGen, UuidIdGen};
 pub use neuron::{NeuronCapabilities, NeuronType};
 pub use polarity::{Polarity, ValidSynapse};
 pub use signal::{

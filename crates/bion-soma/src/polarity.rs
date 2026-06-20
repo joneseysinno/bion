@@ -50,13 +50,21 @@ impl fmt::Display for Polarity {
 ///
 /// Construct only via [`ValidSynapse::new`] — makes a legal wiring orientation
 /// unforgeable without passing the structural check (parse, don't validate).
+///
+/// # Example: direct construction is rejected
+///
+/// ```compile_fail
+/// use bion_soma::{Polarity, ValidSynapse};
+/// let _ = ValidSynapse {
+///     source: Polarity::Afferent,
+///     sink: Polarity::Efferent,
+/// };
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ValidSynapse {
-    /// Emitting side — must be Efferent.
-    pub source: Polarity,
-    /// Receiving side — must be Afferent.
-    pub sink: Polarity,
+    source: Polarity,
+    sink: Polarity,
 }
 
 impl ValidSynapse {
@@ -67,6 +75,16 @@ impl ValidSynapse {
         } else {
             None
         }
+    }
+
+    /// Returns the emitting (Efferent) side.
+    pub const fn source(self) -> Polarity {
+        self.source
+    }
+
+    /// Returns the receiving (Afferent) side.
+    pub const fn sink(self) -> Polarity {
+        self.sink
     }
 }
 
@@ -95,5 +113,12 @@ mod tests {
         assert!(ValidSynapse::new(Polarity::Afferent, Polarity::Afferent).is_none());
         assert!(ValidSynapse::new(Polarity::Efferent, Polarity::Efferent).is_none());
         assert!(ValidSynapse::new(Polarity::Afferent, Polarity::Efferent).is_none());
+    }
+
+    #[test]
+    fn valid_synapse_accessors() {
+        let synapse = ValidSynapse::new(Polarity::Efferent, Polarity::Afferent).unwrap();
+        assert_eq!(synapse.source(), Polarity::Efferent);
+        assert_eq!(synapse.sink(), Polarity::Afferent);
     }
 }

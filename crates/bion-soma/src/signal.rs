@@ -52,8 +52,14 @@ impl fmt::Display for IntValue {
 
 /// A 64-bit IEEE 754 floating-point signal value.
 ///
-/// Does not implement [`Eq`] — use [`PartialEq`] only. Equality uses
-/// `f64::to_bits()` so NaN == NaN (deterministic value comparison).
+/// # Equality and hashing
+/// `FloatValue` implements [`PartialEq`] using bit-pattern comparison (`f64::to_bits()`),
+/// which makes `NaN == NaN` true (deterministic value comparison). It intentionally
+/// does NOT implement [`Eq`] or [`Hash`] because `f64` semantics make those impls
+/// either incorrect (standard IEEE equality) or surprising (bit-pattern hash).
+///
+/// If you need to use a float-typed [`Impulse`] as a map key, hash by [`Impulse::signal_type`]
+/// and use [`Impulse::to_bits_key`] for the value component. See [`Impulse`] docs.
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FloatValue(f64);
@@ -224,9 +230,25 @@ pub enum Compatibility {
 impl SignalType {
     /// Returns the compatibility relationship between `self` and `target`.
     ///
-    /// This is intentionally conservative: only lossless promotions.
-    /// `Int` → `Float` is allowed (widening). `Float` → `Int` is not
-    /// (truncation). `Text` → `Bytes` is not (encoding ambiguity).
+    /// # What belongs here vs. in Cortex
+    ///
+    /// This method encodes ONLY lossless structural promotions that are
+    /// true by definition of the types involved — not application policy.
+    ///
+    /// **Allowed here (structural facts):**
+    /// - `Int → Float`: every i64 is exactly representable as f64 for values
+    ///   within i53 range. Defined as widening because no information is lost
+    ///   for the integer range Bion signals are expected to use.
+    ///
+    /// **NOT allowed here (policy — belongs in Cortex `Immune` or `Morphogen`):**
+    /// - `Bool → Int` (0/1 mapping): a policy decision about what "true" means
+    /// - `Int → Text` (display/formatting): lossy and encoding-dependent
+    /// - `Text → Bytes` (UTF-8 encoding): depends on encoding contract
+    /// - Any coercion that allocates or loses information
+    ///
+    /// If you are tempted to add a new arm to the `match` below, ask:
+    /// "Is this true by definition of the types, or is it a choice the
+    /// framework author is making?" If it is a choice, it belongs in Cortex.
     pub fn compatibility_with(self, target: SignalType) -> Compatibility {
         if self == target {
             return Compatibility::Exact;
@@ -257,6 +279,21 @@ impl SignalType {
 ///
 /// `Impulse` is the *value* that corresponds to a [`SignalType`] *schema*.
 /// Every variant wraps a value newtype that corresponds to exactly one [`SignalType`].
+///
+/// # Hashing
+/// `Impulse` does not implement [`Hash`] because [`FloatValue`] does not.
+/// If you need a hash key derived from an impulse, use [`Impulse::signal_type`]
+/// to bucket by type, and [`Impulse::to_bits_key`] for a stable u64 content key.
+/// Do not use `Impulse` directly as a `HashMap` key.
+///
+/// # Example: `Impulse` cannot be hashed
+///
+/// ```compile_fail
+/// use std::hash::Hash;
+/// use bion_soma::Impulse;
+/// fn assert_hash<T: Hash>() {}
+/// assert_hash::<Impulse>();
+/// ```
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Impulse {
@@ -295,6 +332,34 @@ impl Impulse {
     /// Convenience predicate — true when [`compatibility_with`](Self::compatibility_with) is not [`Compatibility::Incompatible`].
     pub fn is_compatible_with(&self, target: SignalType) -> bool {
         self.signal_type().is_compatible_with(target)
+    }
+
+    /// Returns a stable `u64` bit-pattern key for this impulse's value.
+    ///
+    /// Suitable for hashing when used alongside [`signal_type`](Self::signal_type).
+    /// `NaN` values hash consistently (same bit pattern → same key).
+    /// Not a substitute for [`Hash`] — use only when you control the
+    /// bucketing strategy.
+    ///
+    /// # Bridge only
+    /// Requires the `bridge` feature (uses inner value accessors).
+    #[cfg(feature = "bridge")]
+    pub fn to_bits_key(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+
+        match self {
+            Impulse::Bool(v) => v.as_bool() as u64,
+            Impulse::Int(v) => v.as_i64() as u64,
+            Impulse::Float(v) => v.as_f64().to_bits(),
+            Impulse::Text(v) => {
+                let mut hasher = DefaultHasher::new();
+                v.as_str().hash(&mut hasher);
+                hasher.finish()
+            }
+            Impulse::Bytes(v) => v.len() as u64,
+            Impulse::Unit(_) => 0,
+        }
     }
 }
 
@@ -383,5 +448,12 @@ mod tests {
         let a = FloatValue::new(f64::NAN);
         let b = FloatValue::new(f64::NAN);
         assert_eq!(a, b);
+    }
+
+    #[cfg(feature = "bridge")]
+    #[test]
+    fn impulse_float_nan_bits_key_is_stable() {
+        let impulse = Impulse::Float(FloatValue::new(f64::NAN));
+        assert_eq!(impulse.to_bits_key(), impulse.to_bits_key());
     }
 }
