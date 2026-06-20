@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = ["bion"]
 categories = ["development-tools"]
+repository = "https://github.com/joneseysinno/bion"
 
 [package]
 name = "bion"
@@ -18,6 +19,7 @@ license.workspace = true
 readme.workspace = true
 keywords.workspace = true
 categories.workspace = true
+repository.workspace = true
 description = "Unified facade for the Bion crate ecosystem."
 
 [dependencies]
