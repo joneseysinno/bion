@@ -1,0 +1,11 @@
+[package]
+name = "bion-genesis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Genesis and bootstrapping for the Bion crate ecosystem."
+
+[dependencies]

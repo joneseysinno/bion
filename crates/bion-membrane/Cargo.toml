@@ -1,0 +1,11 @@
+[package]
+name = "bion-membrane"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Membrane boundary layer for the Bion crate ecosystem."
+
+[dependencies]

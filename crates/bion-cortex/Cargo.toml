@@ -1,0 +1,11 @@
+[package]
+name = "bion-cortex"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Cortical processing for the Bion crate ecosystem."
+
+[dependencies]

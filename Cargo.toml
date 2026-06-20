@@ -1,0 +1,28 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["bion"]
+categories = ["development-tools"]
+
+[package]
+name = "bion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Unified facade for the Bion crate ecosystem."
+
+[dependencies]
+bion-cortex = { path = "crates/bion-cortex", version = "0.1.0" }
+bion-connectome = { path = "crates/bion-connectome", version = "0.1.0" }
+bion-genesis = { path = "crates/bion-genesis", version = "0.1.0" }
+bion-membrane = { path = "crates/bion-membrane", version = "0.1.0" }
+bion-soma = { path = "crates/bion-soma", version = "0.1.0" }
