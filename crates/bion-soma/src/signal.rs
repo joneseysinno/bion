@@ -1,6 +1,8 @@
 //! Signal schema, typed value atoms, and impulse payloads.
 
-use std::fmt;
+use alloc::string::String;
+use alloc::vec::Vec;
+use core::fmt;
 
 /// A boolean signal value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -345,22 +347,26 @@ impl Impulse {
     /// Requires the `bridge` feature (uses inner value accessors).
     #[cfg(feature = "bridge")]
     pub fn to_bits_key(&self) -> u64 {
-        use std::hash::{Hash, Hasher};
-        use std::collections::hash_map::DefaultHasher;
-
         match self {
             Impulse::Bool(v) => v.as_bool() as u64,
             Impulse::Int(v) => v.as_i64() as u64,
             Impulse::Float(v) => v.as_f64().to_bits(),
-            Impulse::Text(v) => {
-                let mut hasher = DefaultHasher::new();
-                v.as_str().hash(&mut hasher);
-                hasher.finish()
-            }
+            Impulse::Text(v) => fnv1a(v.as_str().as_bytes()),
             Impulse::Bytes(v) => v.len() as u64,
             Impulse::Unit(_) => 0,
         }
     }
+}
+
+/// FNV-1a 64-bit hash for bridge-only impulse keys (no_std-safe).
+#[cfg(feature = "bridge")]
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for &b in bytes {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 impl fmt::Display for Impulse {

@@ -16,7 +16,6 @@ include = [
 ]
 
 [dependencies]
-uuid = { version = "1", features = ["v4"] }
 serde = { version = "1", features = ["derive"], optional = true }
 
 [features]

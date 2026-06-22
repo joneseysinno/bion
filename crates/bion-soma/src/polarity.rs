@@ -1,6 +1,6 @@
 //! Fiber directional orientation and validated synapse wiring.
 
-use std::fmt;
+use core::fmt;
 
 /// The directional orientation of a Fiber connection point.
 ///

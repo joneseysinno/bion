@@ -7,7 +7,12 @@
 //! This crate may not import from any other `bion-*` crate.
 //! It may not reference any `infinite-db` type names.
 
+#![no_std]
 #![deny(missing_docs)]
+#![forbid(unsafe_code)]
+#![deny(clippy::mutex_atomic)]
+
+extern crate alloc;
 
 pub mod id;
 pub mod neuron;
@@ -15,7 +20,7 @@ pub mod polarity;
 pub mod signal;
 pub mod tag;
 
-pub use id::{FiberId, IdGen, NeuronId, SequentialIdGen, UuidIdGen};
+pub use id::{FiberId, IdSeed, IdSource, NeuronId};
 pub use neuron::{NeuronCapabilities, NeuronType};
 pub use polarity::{Polarity, ValidSynapse};
 pub use signal::{

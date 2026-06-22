@@ -1,7 +1,10 @@
 //! Routing and filtering labels for behavioral domains.
 
-use std::fmt;
-use std::str::FromStr;
+use alloc::borrow::ToOwned;
+use alloc::string::String;
+use core::error::Error;
+use core::fmt;
+use core::str::FromStr;
 
 /// Errors that can occur when constructing a [`CortexTag`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -29,7 +32,7 @@ impl fmt::Display for TagError {
     }
 }
 
-impl std::error::Error for TagError {}
+impl Error for TagError {}
 
 /// A routing and filtering label associating a node with a behavioral domain.
 ///
@@ -90,6 +93,7 @@ impl FromStr for CortexTag {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::string::ToString;
 
     #[test]
     fn display_formats_hash_prefix() {

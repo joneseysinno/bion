@@ -1,7 +1,7 @@
-//! Identity primitives — opaque neuron and fiber handles and generators.
+//! Identity primitives — opaque neuron and fiber handles and pure derivation.
 
-use std::fmt;
-use std::num::NonZeroU64;
+use core::fmt;
+use core::num::NonZeroU64;
 
 /// An opaque, unique identifier for a Neuron.
 ///
@@ -11,7 +11,7 @@ use std::num::NonZeroU64;
 ///
 /// # Design note
 /// The inner [`NonZeroU64`] is private. Nothing outside this module should
-/// construct a `NeuronId` by raw value — only [`IdGen`] impls mint them.
+/// construct a `NeuronId` by raw value — only [`IdSeed`] / [`IdSource`] mint them.
 /// This prevents accidentally valid-looking IDs from being fabricated and
 /// makes zero an unrepresentable ID (use `Option<NeuronId>` for absence).
 ///
@@ -20,11 +20,12 @@ use std::num::NonZeroU64;
 /// retired (its Neuron deleted), the same numeric value may in principle be
 /// issued to a new Neuron. In practice:
 ///
-/// - [`SequentialIdGen`] never reuses IDs within a session (monotonic counter).
-///   Across sessions (e.g. loading from a database), IDs are assigned by the
-///   stored genome — the database is the source of truth, not the generator.
+/// - [`IdSeed`] never reuses IDs within a deterministic minting session
+///   (monotonic counters). Across sessions (e.g. loading from a database),
+///   IDs are assigned by the stored genome — the database is the source of
+///   truth, not the seed.
 ///
-/// - [`UuidIdGen`] never reuses IDs in practice (collision probability ~2^-64).
+/// - Entropy-based schemes (UUID, etc.) live in `bion-store` as impure adapters.
 ///
 /// If you need stale-reference detection (holding a `NeuronId` to a Neuron
 /// that has since been deleted), the store layer is responsible — check
@@ -37,8 +38,7 @@ pub struct NeuronId(NonZeroU64);
 
 impl NeuronId {
     /// Private constructor — only callable within this crate.
-    /// External code must go through an [`IdGen`] impl.
-    pub(crate) fn from_nonzero(raw: NonZeroU64) -> Self {
+    pub(crate) const fn from_nonzero(raw: NonZeroU64) -> Self {
         Self(raw)
     }
 
@@ -46,10 +46,10 @@ impl NeuronId {
     ///
     /// # Bridge only
     /// Enabled with the `bridge` feature. Do not use this to construct IDs —
-    /// use [`IdGen`]. Application code must not depend on raw ID values.
+    /// use [`IdSeed`] or [`IdSource`]. Application code must not depend on raw ID values.
     #[cfg(feature = "bridge")]
-    pub fn as_raw(self) -> u64 {
-        self.0.get()
+    pub const fn as_raw(self) -> NonZeroU64 {
+        self.0
     }
 }
 
@@ -77,25 +77,16 @@ impl fmt::Display for NeuronId {
 /// bug the type system should prevent entirely.
 ///
 /// # ID reuse and generation safety
-/// `FiberId` does not include a generation counter. Once a `FiberId` is
-/// retired (its Fiber deleted), the same numeric value may in principle be
-/// issued to a new Fiber. In practice:
-///
-/// - [`SequentialIdGen`] never reuses IDs within a session (monotonic counter).
-///   Across sessions, IDs are assigned by the stored genome — the database
-///   is the source of truth, not the generator.
-///
-/// - [`UuidIdGen`] never reuses IDs in practice (collision probability ~2^-64).
-///
-/// If you need stale-reference detection, the store layer is responsible.
-/// Do not add a generation counter to `FiberId` without a full design review.
+/// `FiberId` does not include a generation counter. See [`NeuronId`] for the
+/// full reuse policy. Impure allocation (entropy, ambient counters, db-assigned
+/// ids) belongs in `bion-store`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FiberId(NonZeroU64);
 
 impl FiberId {
     /// Private constructor — only callable within this crate.
-    pub(crate) fn from_nonzero(raw: NonZeroU64) -> Self {
+    pub(crate) const fn from_nonzero(raw: NonZeroU64) -> Self {
         Self(raw)
     }
 
@@ -103,9 +94,9 @@ impl FiberId {
     ///
     /// # Bridge only
     /// Enabled with the `bridge` feature. Do not use this to construct IDs —
-    /// use [`IdGen`]. Application code must not depend on raw ID values.
+    /// use [`IdSeed`] or [`IdSource`]. Application code must not depend on raw ID values.
     #[cfg(feature = "bridge")]
-    pub fn as_raw(self) -> NonZeroU64 {
+    pub const fn as_raw(self) -> NonZeroU64 {
         self.0
     }
 }
@@ -116,112 +107,111 @@ impl fmt::Display for FiberId {
     }
 }
 
-/// Identity generation service.
+/// A pure, deterministic identifier seed.
 ///
-/// `IdGen` is a trait so that different contexts can use different strategies:
-/// - Production: UUID-based (globally unique, safe across distributed nodes)
-/// - Testing: Sequential (deterministic, debuggable, reproducible)
-/// - Simulation: Seeded random (reproducible chaos)
+/// `IdSeed` is a *value*, not a generator with hidden state. Minting consumes
+/// the seed and returns the id together with the successor seed:
 ///
-/// Implementors must guarantee that no two calls to `next_neuron_id` or
-/// `next_fiber_id` on the same instance return the same ID within the
-/// instance's lifetime.
-pub trait IdGen: Send + Sync {
-    /// Mint the next unique [`NeuronId`].
-    fn next_neuron_id(&mut self) -> NeuronId;
-
-    /// Mint the next unique [`FiberId`].
-    fn next_fiber_id(&mut self) -> FiberId;
+/// ```text
+/// (id_0, seed_1) = seed_0.mint_neuron().unwrap();
+/// (id_1, seed_2) = seed_1.mint_neuron().unwrap();
+/// ```
+///
+/// Given the same seed, `mint_*` always returns the same `(id, next)` pair —
+/// referential transparency holds. There is no `&mut`, no interior mutability,
+/// no entropy, no clock.
+///
+/// Neuron and Fiber ids draw from independent counters, so `Neuron(1)` and
+/// `Fiber(1)` may coexist.
+///
+/// # Effects live above Soma
+/// Ambient/`&mut` allocation, UUID/entropy schemes, and db-assigned ids are
+/// all *effects*. They belong in `bion-store` as impure adapters that wrap a
+/// pure [`IdSource`]. Soma only defines deterministic derivation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct IdSeed {
+    neuron: NonZeroU64,
+    fiber: NonZeroU64,
 }
 
-fn next_nonzero_from_uuid() -> NonZeroU64 {
-    loop {
-        let uuid = uuid::Uuid::new_v4();
-        let (high, _) = uuid.as_u64_pair();
-        if let Some(nz) = NonZeroU64::new(high) {
-            return nz;
-        }
-    }
-}
-
-/// A deterministic, sequential [`IdGen`] for use in tests and simulations.
-///
-/// IDs start at 1 because [`NeuronId`] and [`FiberId`] wrap [`NonZeroU64`] —
-/// zero is unrepresentable. Use `Option<NeuronId>` / `Option<FiberId>` for
-/// absence at higher layers.
-///
-/// # Session scope
-/// Counters are monotonic within a single generator instance (one session).
-/// IDs are never reused within that session. Across sessions, persisted
-/// genomes assign IDs — the store is the source of truth.
-///
-/// # Warning
-/// Do not use in production. Sequential IDs are predictable and
-/// will collide if two instances are created independently.
-pub struct SequentialIdGen {
-    neuron_counter: NonZeroU64,
-    fiber_counter: NonZeroU64,
-}
-
-impl SequentialIdGen {
-    /// Creates a generator whose first neuron and fiber IDs are both 1.
-    pub fn new() -> Self {
+impl IdSeed {
+    /// The origin seed. Both counters start at 1 (`NonZeroU64::MIN`).
+    pub const fn first() -> Self {
         Self {
-            neuron_counter: NonZeroU64::MIN,
-            fiber_counter: NonZeroU64::MIN,
+            neuron: NonZeroU64::MIN,
+            fiber: NonZeroU64::MIN,
+        }
+    }
+
+    /// Resume from explicit raw counters (e.g. rehydrating from a stored
+    /// genome). Returns `None` if either raw value is zero.
+    pub const fn from_raw(neuron: u64, fiber: u64) -> Option<Self> {
+        match (NonZeroU64::new(neuron), NonZeroU64::new(fiber)) {
+            (Some(n), Some(f)) => Some(Self { neuron: n, fiber: f }),
+            _ => None,
+        }
+    }
+
+    /// Mint a [`NeuronId`] and the successor seed.
+    ///
+    /// Returns `None` when the neuron counter would overflow `u64`.
+    /// Total — never panics.
+    pub const fn mint_neuron(self) -> Option<(NeuronId, IdSeed)> {
+        let id = NeuronId::from_nonzero(self.neuron);
+        match self.neuron.checked_add(1) {
+            Some(next) => Some((
+                id,
+                IdSeed {
+                    neuron: next,
+                    fiber: self.fiber,
+                },
+            )),
+            None => None,
+        }
+    }
+
+    /// Mint a [`FiberId`] and the successor seed.
+    ///
+    /// Returns `None` when the fiber counter would overflow `u64`.
+    /// Total — never panics.
+    pub const fn mint_fiber(self) -> Option<(FiberId, IdSeed)> {
+        let id = FiberId::from_nonzero(self.fiber);
+        match self.fiber.checked_add(1) {
+            Some(next) => Some((
+                id,
+                IdSeed {
+                    neuron: self.neuron,
+                    fiber: next,
+                },
+            )),
+            None => None,
         }
     }
 }
 
-impl Default for SequentialIdGen {
-    fn default() -> Self {
-        Self::new()
-    }
+/// A pure source of fresh identifiers.
+///
+/// Implementors are *values*: minting consumes `self` and returns the id plus
+/// the successor source. No `&mut`, no interior mutability, no entropy, no clock.
+///
+/// All effectful allocation — ambient counters, UUID/entropy, db-assigned ids —
+/// lives **above Soma** (in `bion-store`) as an impure adapter that drives a
+/// pure `IdSource` internally.
+pub trait IdSource: Sized {
+    /// Mint a neuron id and the successor source, or `None` if exhausted.
+    fn mint_neuron(self) -> Option<(NeuronId, Self)>;
+    /// Mint a fiber id and the successor source, or `None` if exhausted.
+    fn mint_fiber(self) -> Option<(FiberId, Self)>;
 }
 
-impl IdGen for SequentialIdGen {
-    fn next_neuron_id(&mut self) -> NeuronId {
-        let id = NeuronId::from_nonzero(self.neuron_counter);
-        self.neuron_counter = self
-            .neuron_counter
-            .checked_add(1)
-            .expect("SequentialIdGen neuron counter exhausted");
-        id
+impl IdSource for IdSeed {
+    fn mint_neuron(self) -> Option<(NeuronId, Self)> {
+        IdSeed::mint_neuron(self)
     }
 
-    fn next_fiber_id(&mut self) -> FiberId {
-        let id = FiberId::from_nonzero(self.fiber_counter);
-        self.fiber_counter = self
-            .fiber_counter
-            .checked_add(1)
-            .expect("SequentialIdGen fiber counter exhausted");
-        id
-    }
-}
-
-/// A UUID-based [`IdGen`] for production use.
-///
-/// Each call generates a new UUIDv4, truncates to u64 via the high 64 bits.
-/// If the high bits are zero (astronomically rare), retries until non-zero.
-///
-/// # Collision probability
-/// Truncating UUIDv4 to 64 bits yields collision probability ~50% only after
-/// ~2^32 IDs (birthday bound). For realistic Bion graphs this is acceptable.
-/// The bridge layer may store full 128-bit UUIDs for external correlation.
-///
-/// # Design note
-/// We truncate UUID to u64 rather than storing the full 128-bit UUID because
-/// ID types are used as map keys throughout the hot execution path and
-/// u64 hashing is significantly faster than u128.
-pub struct UuidIdGen;
-
-impl IdGen for UuidIdGen {
-    fn next_neuron_id(&mut self) -> NeuronId {
-        NeuronId::from_nonzero(next_nonzero_from_uuid())
-    }
-
-    fn next_fiber_id(&mut self) -> FiberId {
-        FiberId::from_nonzero(next_nonzero_from_uuid())
+    fn mint_fiber(self) -> Option<(FiberId, Self)> {
+        IdSeed::mint_fiber(self)
     }
 }
 
@@ -230,62 +220,109 @@ mod tests {
     use super::*;
 
     #[test]
-    fn sequential_produces_distinct_neuron_ids() {
-        let mut id_gen = SequentialIdGen::new();
-        let a = id_gen.next_neuron_id();
-        let b = id_gen.next_neuron_id();
+    fn mint_neuron_is_deterministic() {
+        let seed = IdSeed::first();
+        let (a, next_a) = seed.mint_neuron().unwrap();
+        let (b, next_b) = seed.mint_neuron().unwrap();
+        assert_eq!(a, b);
+        assert_eq!(next_a, next_b);
+    }
+
+    #[test]
+    fn mint_fiber_is_deterministic() {
+        let seed = IdSeed::first();
+        let (a, next_a) = seed.mint_fiber().unwrap();
+        let (b, next_b) = seed.mint_fiber().unwrap();
+        assert_eq!(a, b);
+        assert_eq!(next_a, next_b);
+    }
+
+    #[test]
+    fn chained_mints_produce_distinct_neuron_ids() {
+        let (a, seed) = IdSeed::first().mint_neuron().unwrap();
+        let (b, _) = seed.mint_neuron().unwrap();
         assert_ne!(a, b);
     }
 
     #[test]
-    fn sequential_produces_distinct_fiber_ids() {
-        let mut id_gen = SequentialIdGen::new();
-        let a = id_gen.next_fiber_id();
-        let b = id_gen.next_fiber_id();
+    fn chained_mints_produce_distinct_fiber_ids() {
+        let (a, seed) = IdSeed::first().mint_fiber().unwrap();
+        let (b, _) = seed.mint_fiber().unwrap();
         assert_ne!(a, b);
     }
 
     #[test]
-    fn neuron_and_fiber_ids_are_distinct_types() {
-        let mut id_gen = SequentialIdGen::new();
-        let _neuron: NeuronId = id_gen.next_neuron_id();
-        let _fiber: FiberId = id_gen.next_fiber_id();
+    fn neuron_and_fiber_counters_are_independent() {
+        let seed = IdSeed::first();
+        let (n1, seed) = seed.mint_neuron().unwrap();
+        let (f1, seed) = seed.mint_fiber().unwrap();
+        let (n2, _) = seed.mint_neuron().unwrap();
+        let _ = (n1, f1, n2);
     }
 
     #[test]
-    fn sequential_is_monotonic_with_bridge() {
-        #[cfg(feature = "bridge")]
-        {
-            let mut id_gen = SequentialIdGen::new();
-            let a = id_gen.next_neuron_id().as_raw();
-            let b = id_gen.next_neuron_id().as_raw();
-            assert!(a < b);
-        }
+    fn mint_neuron_at_max_returns_none_without_panic() {
+        let seed = IdSeed {
+            neuron: NonZeroU64::MAX,
+            fiber: NonZeroU64::MIN,
+        };
+        assert!(seed.mint_neuron().is_none());
     }
 
     #[test]
-    fn uuid_produces_distinct_neuron_ids() {
-        let mut id_gen = UuidIdGen;
-        let ids: Vec<NeuronId> = (0..32).map(|_| id_gen.next_neuron_id()).collect();
-        for i in 0..ids.len() {
-            for j in (i + 1)..ids.len() {
-                assert_ne!(ids[i], ids[j]);
-            }
-        }
+    fn mint_neuron_exhausts_after_penultimate() {
+        let penultimate = NonZeroU64::new(u64::MAX - 1).unwrap();
+        let seed = IdSeed {
+            neuron: penultimate,
+            fiber: NonZeroU64::MIN,
+        };
+        let (_, exhausted) = seed.mint_neuron().unwrap();
+        assert!(exhausted.mint_neuron().is_none());
+    }
+
+    #[test]
+    fn mint_fiber_at_max_returns_none_without_panic() {
+        let seed = IdSeed {
+            neuron: NonZeroU64::MIN,
+            fiber: NonZeroU64::MAX,
+        };
+        assert!(seed.mint_fiber().is_none());
+    }
+
+    #[test]
+    fn mint_fiber_exhausts_after_penultimate() {
+        let penultimate = NonZeroU64::new(u64::MAX - 1).unwrap();
+        let seed = IdSeed {
+            neuron: NonZeroU64::MIN,
+            fiber: penultimate,
+        };
+        let (_, exhausted) = seed.mint_fiber().unwrap();
+        assert!(exhausted.mint_fiber().is_none());
+    }
+
+    #[test]
+    fn id_source_trait_matches_id_seed() {
+        let seed = IdSeed::first();
+        let via_trait = IdSource::mint_neuron(seed).unwrap();
+        let via_method = seed.mint_neuron().unwrap();
+        assert_eq!(via_trait.0, via_method.0);
+        assert_eq!(via_trait.1, via_method.1);
+    }
+
+    #[cfg(feature = "bridge")]
+    #[test]
+    fn as_raw_is_monotonic_for_neurons() {
+        let (a, seed) = IdSeed::first().mint_neuron().unwrap();
+        let (b, _) = seed.mint_neuron().unwrap();
+        assert!(a.as_raw().get() < b.as_raw().get());
     }
 
     #[cfg(feature = "bridge")]
     #[test]
     fn as_raw_never_zero() {
-        let mut seq_gen = SequentialIdGen::new();
-        for _ in 0..10 {
-            assert_ne!(seq_gen.next_neuron_id().as_raw(), 0);
-            assert_ne!(seq_gen.next_fiber_id().as_raw().get(), 0);
-        }
-        let mut uuid_gen = UuidIdGen;
-        for _ in 0..10 {
-            assert_ne!(uuid_gen.next_neuron_id().as_raw(), 0);
-            assert_ne!(uuid_gen.next_fiber_id().as_raw().get(), 0);
-        }
+        let (n, seed) = IdSeed::first().mint_neuron().unwrap();
+        let (f, _) = seed.mint_fiber().unwrap();
+        assert_ne!(n.as_raw().get(), 0);
+        assert_ne!(f.as_raw().get(), 0);
     }
 }
