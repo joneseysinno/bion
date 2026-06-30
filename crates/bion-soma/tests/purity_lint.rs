@@ -40,6 +40,7 @@ fn no_effect_vocabulary_in_src() {
         "UuidIdGen",
         "SequentialIdGen",
         "trait IdGen",
+        "CortexTag",
     ];
 
     for (path, text) in read_all_rust_sources(&src_root()) {

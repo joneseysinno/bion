@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Soma purity (no I/O vocabulary)
+        run: |
+          if grep -rE 'std::io|tokio|async fn|infinite_db' crates/bion-soma/src; then
+            echo "Soma purity violation"
+            exit 1
+          fi
+      - name: CNS never touches db
+        run: |
+          if grep -rE 'infinite_db|InfiniteDb|SpaceId|RevisionId|HilbertKey' crates/bion-cns/src; then
+            echo "CNS db boundary violation"
+            exit 1
+          fi
+      - name: Vocabulary disjointness
+        run: bash scripts/lint_vocabulary.sh
+      - name: One function per file (PNS)
+        run: bash scripts/lint_single_function.sh crates/bion-pns/src
+      - name: One function per file (CNS)
+        run: bash scripts/lint_single_function.sh crates/bion-cns/src
+      - name: cargo check
+        run: cargo check --workspace --all-features
+      - name: cargo test
+        run: cargo test --workspace --all-features

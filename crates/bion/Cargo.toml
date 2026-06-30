@@ -1,0 +1,22 @@
+[package]
+name = "bion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+repository.workspace = true
+description = "Unified facade for the Bion crate ecosystem."
+
+[features]
+default = ["soma", "pns"]
+soma = ["dep:bion-soma"]
+pns = ["dep:bion-pns"]
+cns = ["dep:bion-cns"]
+full = ["soma", "pns", "cns"]
+
+[dependencies]
+bion-soma = { workspace = true, optional = true }
+bion-pns = { workspace = true, optional = true }
+bion-cns = { workspace = true, optional = true }

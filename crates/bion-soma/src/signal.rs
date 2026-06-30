@@ -2,10 +2,15 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::cmp::Ordering;
 use core::fmt;
+use core::hash::{Hash, Hasher};
 
 /// A boolean signal value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// Deliberately-unconstrained nominal wrapper — carries no invariant beyond
+/// distinguishing bool payloads from other signal types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BoolValue(bool);
 
@@ -29,7 +34,10 @@ impl fmt::Display for BoolValue {
 }
 
 /// A 64-bit signed integer signal value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// Deliberately-unconstrained nominal wrapper — carries no invariant beyond
+/// distinguishing integer payloads from other signal types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct IntValue(i64);
 
@@ -54,22 +62,26 @@ impl fmt::Display for IntValue {
 
 /// A 64-bit IEEE 754 floating-point signal value.
 ///
-/// # Equality and hashing
-/// `FloatValue` implements [`PartialEq`] using bit-pattern comparison (`f64::to_bits()`),
-/// which makes `NaN == NaN` true (deterministic value comparison). It intentionally
-/// does NOT implement [`Eq`] or [`Hash`] because `f64` semantics make those impls
-/// either incorrect (standard IEEE equality) or surprising (bit-pattern hash).
+/// Only finite values are representable. `NaN` and `±Inf` are rejected at
+/// construction — a signal value of non-finite magnitude has no transducer
+/// meaning in Soma.
 ///
-/// If you need to use a float-typed [`Impulse`] as a map key, hash by [`Impulse::signal_type`]
-/// and use [`Impulse::to_bits_key`] for the value component. See [`Impulse`] docs.
+/// Implements [`Eq`], [`Hash`], and [`Ord`] via `f64::total_cmp` over finite
+/// values (`-0.0 < +0.0`).
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct FloatValue(f64);
 
 impl FloatValue {
-    /// Wraps a floating-point payload.
-    pub const fn new(value: f64) -> Self {
-        Self(value)
+    /// Wraps a finite floating-point payload.
+    ///
+    /// Returns `None` for `NaN`, `+Inf`, and `-Inf`.
+    pub fn new(value: f64) -> Option<Self> {
+        if value.is_finite() {
+            Some(Self(value))
+        } else {
+            None
+        }
     }
 
     /// Returns the inner float (bridge / serialization only).
@@ -81,7 +93,27 @@ impl FloatValue {
 
 impl PartialEq for FloatValue {
     fn eq(&self, other: &Self) -> bool {
-        self.0.to_bits() == other.0.to_bits()
+        self.0.total_cmp(&other.0) == Ordering::Equal
+    }
+}
+
+impl Eq for FloatValue {}
+
+impl PartialOrd for FloatValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FloatValue {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+impl Hash for FloatValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.to_bits().hash(state);
     }
 }
 
@@ -92,7 +124,10 @@ impl fmt::Display for FloatValue {
 }
 
 /// A UTF-8 text signal value.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// Deliberately-unconstrained nominal wrapper — domain-specific text policy
+/// (max length, charset) belongs in Cortex.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct SignalText(String);
 
@@ -121,7 +156,10 @@ impl fmt::Display for SignalText {
 }
 
 /// Raw binary signal data. No encoding assumed.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// Deliberately-unconstrained nominal wrapper — encoding contracts belong in
+/// Cortex or the Membrane layer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ByteBlob(Vec<u8>);
 
@@ -155,7 +193,13 @@ impl fmt::Display for ByteBlob {
 }
 
 /// Explicit trigger token — the signal is the fact of firing, not data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+///
+/// # What `Unit` is not
+/// - **Not silence** — silence (did not fire) is modeled as `Option<Impulse>`
+///   at the Connectome edge. Absence is the type system's job.
+/// - **Not inhibition** — active suppression is future work via the reserved
+///   `PolaritySign` / `Charge` dipole model (deferred).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UnitValue;
 
@@ -174,11 +218,10 @@ impl fmt::Display for UnitValue {
 
 /// The type of data that a Fiber carries and a Synapse transmits.
 ///
-/// `SignalType` is the type system of the Bion graph. Two Fibers may only
-/// form a valid Synapse if their SignalTypes are compatible. Compatibility
-/// checking lives in `bion-cortex` (the `Immune` validator) — this enum
-/// only defines what types exist.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// `SignalType` is the type system of the Bion graph — it defines what types
+/// exist. Whether two types may connect, widen, or coerce is decided in
+/// `bion-cortex` (`Immune`, `Morphogen`), not here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum SignalType {
     /// A boolean signal: true or false, on or off, fired or silent.
@@ -191,90 +234,8 @@ pub enum SignalType {
     Text,
     /// Raw binary data. No encoding assumed.
     Bytes,
-    /// Event-only trigger with no payload.
+    /// Event-only trigger with no payload (fired, not silence).
     Unit,
-}
-
-/// Why two signal types are or are not compatible.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum CompatibilityReason {
-    /// Types differ with no lossless conversion path.
-    TypeMismatch,
-    /// Conversion would lose information.
-    LossyConversion,
-}
-
-/// Result of comparing two signal types for lossless compatibility.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum Compatibility {
-    /// Same type — exact match.
-    Exact,
-    /// Lossless widening (e.g. Int → Float).
-    Widening {
-        /// Source schema type.
-        from: SignalType,
-        /// Target schema type.
-        to: SignalType,
-    },
-    /// Incompatible — coercion would lose information or change meaning.
-    Incompatible {
-        /// Source schema type.
-        from: SignalType,
-        /// Target schema type.
-        to: SignalType,
-        /// Why the types are incompatible.
-        reason: CompatibilityReason,
-    },
-}
-
-impl SignalType {
-    /// Returns the compatibility relationship between `self` and `target`.
-    ///
-    /// # What belongs here vs. in Cortex
-    ///
-    /// This method encodes ONLY lossless structural promotions that are
-    /// true by definition of the types involved — not application policy.
-    ///
-    /// **Allowed here (structural facts):**
-    /// - `Int → Float`: every i64 is exactly representable as f64 for values
-    ///   within i53 range. Defined as widening because no information is lost
-    ///   for the integer range Bion signals are expected to use.
-    ///
-    /// **NOT allowed here (policy — belongs in Cortex `Immune` or `Morphogen`):**
-    /// - `Bool → Int` (0/1 mapping): a policy decision about what "true" means
-    /// - `Int → Text` (display/formatting): lossy and encoding-dependent
-    /// - `Text → Bytes` (UTF-8 encoding): depends on encoding contract
-    /// - Any coercion that allocates or loses information
-    ///
-    /// If you are tempted to add a new arm to the `match` below, ask:
-    /// "Is this true by definition of the types, or is it a choice the
-    /// framework author is making?" If it is a choice, it belongs in Cortex.
-    pub fn compatibility_with(self, target: SignalType) -> Compatibility {
-        if self == target {
-            return Compatibility::Exact;
-        }
-        match (self, target) {
-            (SignalType::Int, SignalType::Float) => Compatibility::Widening {
-                from: SignalType::Int,
-                to: SignalType::Float,
-            },
-            _ => Compatibility::Incompatible {
-                from: self,
-                to: target,
-                reason: CompatibilityReason::TypeMismatch,
-            },
-        }
-    }
-
-    /// Convenience predicate — true when [`compatibility_with`](Self::compatibility_with) is not [`Compatibility::Incompatible`].
-    pub fn is_compatible_with(self, target: SignalType) -> bool {
-        !matches!(
-            self.compatibility_with(target),
-            Compatibility::Incompatible { .. }
-        )
-    }
 }
 
 /// A typed data quantum — the payload carried by a Synapse.
@@ -282,21 +243,10 @@ impl SignalType {
 /// `Impulse` is the *value* that corresponds to a [`SignalType`] *schema*.
 /// Every variant wraps a value newtype that corresponds to exactly one [`SignalType`].
 ///
-/// # Hashing
-/// `Impulse` does not implement [`Hash`] because [`FloatValue`] does not.
-/// If you need a hash key derived from an impulse, use [`Impulse::signal_type`]
-/// to bucket by type, and [`Impulse::to_bits_key`] for a stable u64 content key.
-/// Do not use `Impulse` directly as a `HashMap` key.
-///
-/// # Example: `Impulse` cannot be hashed
-///
-/// ```compile_fail
-/// use std::hash::Hash;
-/// use bion_soma::Impulse;
-/// fn assert_hash<T: Hash>() {}
-/// assert_hash::<Impulse>();
-/// ```
-#[derive(Debug, Clone, PartialEq)]
+/// # Silence at the Connectome boundary
+/// A neuron that did not fire is represented as `Option<Impulse>::None` at the
+/// Connectome layer — not as a variant of `Impulse`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Impulse {
     /// Boolean payload.
@@ -309,7 +259,7 @@ pub enum Impulse {
     Text(SignalText),
     /// Binary payload.
     Bytes(ByteBlob),
-    /// Unit trigger payload.
+    /// Unit trigger payload (fired with no data — not silence).
     Unit(UnitValue),
 }
 
@@ -325,48 +275,6 @@ impl Impulse {
             Impulse::Unit(_) => SignalType::Unit,
         }
     }
-
-    /// Returns the compatibility relationship with the given target schema.
-    pub fn compatibility_with(&self, target: SignalType) -> Compatibility {
-        self.signal_type().compatibility_with(target)
-    }
-
-    /// Convenience predicate — true when [`compatibility_with`](Self::compatibility_with) is not [`Compatibility::Incompatible`].
-    pub fn is_compatible_with(&self, target: SignalType) -> bool {
-        self.signal_type().is_compatible_with(target)
-    }
-
-    /// Returns a stable `u64` bit-pattern key for this impulse's value.
-    ///
-    /// Suitable for hashing when used alongside [`signal_type`](Self::signal_type).
-    /// `NaN` values hash consistently (same bit pattern → same key).
-    /// Not a substitute for [`Hash`] — use only when you control the
-    /// bucketing strategy.
-    ///
-    /// # Bridge only
-    /// Requires the `bridge` feature (uses inner value accessors).
-    #[cfg(feature = "bridge")]
-    pub fn to_bits_key(&self) -> u64 {
-        match self {
-            Impulse::Bool(v) => v.as_bool() as u64,
-            Impulse::Int(v) => v.as_i64() as u64,
-            Impulse::Float(v) => v.as_f64().to_bits(),
-            Impulse::Text(v) => fnv1a(v.as_str().as_bytes()),
-            Impulse::Bytes(v) => v.len() as u64,
-            Impulse::Unit(_) => 0,
-        }
-    }
-}
-
-/// FNV-1a 64-bit hash for bridge-only impulse keys (no_std-safe).
-#[cfg(feature = "bridge")]
-fn fnv1a(bytes: &[u8]) -> u64 {
-    let mut hash = 0xcbf29ce484222325u64;
-    for &b in bytes {
-        hash ^= b as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
 }
 
 impl fmt::Display for Impulse {
@@ -385,7 +293,6 @@ impl fmt::Display for Impulse {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn impulse_signal_type_variants() {
         assert_eq!(
@@ -397,7 +304,7 @@ mod tests {
             SignalType::Int
         );
         assert_eq!(
-            Impulse::Float(FloatValue::new(1.5)).signal_type(),
+            Impulse::Float(FloatValue::new(1.5).unwrap()).signal_type(),
             SignalType::Float
         );
         assert_eq!(
@@ -415,51 +322,35 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_exact_and_widening() {
-        assert_eq!(
-            SignalType::Int.compatibility_with(SignalType::Int),
-            Compatibility::Exact
-        );
-        assert_eq!(
-            SignalType::Int.compatibility_with(SignalType::Float),
-            Compatibility::Widening {
-                from: SignalType::Int,
-                to: SignalType::Float,
-            }
-        );
+    fn float_value_rejects_non_finite() {
+        assert!(FloatValue::new(f64::NAN).is_none());
+        assert!(FloatValue::new(f64::INFINITY).is_none());
+        assert!(FloatValue::new(f64::NEG_INFINITY).is_none());
+        assert!(FloatValue::new(1.5).is_some());
     }
 
     #[test]
-    fn compatibility_incompatible_float_to_int() {
-        assert_eq!(
-            SignalType::Float.compatibility_with(SignalType::Int),
-            Compatibility::Incompatible {
-                from: SignalType::Float,
-                to: SignalType::Int,
-                reason: CompatibilityReason::TypeMismatch,
-            }
-        );
-        assert!(!SignalType::Float.is_compatible_with(SignalType::Int));
+    fn float_value_orders_zero_signs() {
+        let neg = FloatValue::new(-0.0).unwrap();
+        let pos = FloatValue::new(0.0).unwrap();
+        assert!(neg < pos);
+        assert_ne!(neg, pos);
     }
 
     #[test]
-    fn impulse_delegates_compatibility() {
-        let impulse = Impulse::Int(IntValue::new(1));
-        assert!(impulse.is_compatible_with(SignalType::Float));
-        assert!(!impulse.is_compatible_with(SignalType::Text));
-    }
-
-    #[test]
-    fn float_value_nan_equals_nan() {
-        let a = FloatValue::new(f64::NAN);
-        let b = FloatValue::new(f64::NAN);
+    fn float_value_eq_is_lawful() {
+        let a = FloatValue::new(1.5).unwrap();
+        let b = FloatValue::new(1.5).unwrap();
         assert_eq!(a, b);
     }
 
-    #[cfg(feature = "bridge")]
     #[test]
-    fn impulse_float_nan_bits_key_is_stable() {
-        let impulse = Impulse::Float(FloatValue::new(f64::NAN));
-        assert_eq!(impulse.to_bits_key(), impulse.to_bits_key());
+    fn impulse_orders_distinct_variants() {
+        let mut impulses = [
+            Impulse::Int(IntValue::new(1)),
+            Impulse::Float(FloatValue::new(2.0).unwrap()),
+        ];
+        impulses.sort();
+        assert_ne!(impulses[0], impulses[1]);
     }
 }

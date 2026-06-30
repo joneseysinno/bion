@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/*"]
+members = [
+    "crates/bion-soma",
+    "crates/bion-pns",
+    "crates/bion-cns",
+    "crates/bion",
+]
 resolver = "2"
 
 [workspace.package]
@@ -11,20 +16,13 @@ keywords = ["bion"]
 categories = ["development-tools"]
 repository = "https://github.com/joneseysinno/bion"
 
-[package]
-name = "bion"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-readme.workspace = true
-keywords.workspace = true
-categories.workspace = true
-repository.workspace = true
-description = "Unified facade for the Bion crate ecosystem."
-
-[dependencies]
-bion-cortex = { path = "crates/bion-cortex", version = "0.1.0" }
-bion-connectome = { path = "crates/bion-connectome", version = "0.1.0" }
-bion-genesis = { path = "crates/bion-genesis", version = "0.1.0" }
-bion-membrane = { path = "crates/bion-membrane", version = "0.1.0" }
+[workspace.dependencies]
 bion-soma = { path = "crates/bion-soma", version = "0.1.0" }
+bion-pns = { path = "crates/bion-pns", version = "0.1.0" }
+bion-cns = { path = "crates/bion-cns", version = "0.1.0" }
+tokio = { version = "1", features = ["rt", "sync"] }
+serde = { version = "1", features = ["derive"] }
+uuid = { version = "1", features = ["v4"] }
+async-trait = "0.1"
+tokio-tungstenite = { version = "0.21" }
+axum = { version = "0.7" }

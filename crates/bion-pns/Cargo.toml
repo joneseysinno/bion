@@ -1,0 +1,32 @@
+[package]
+name = "bion-pns"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+readme.workspace = true
+keywords = ["bion", "async", "database", "graph"]
+categories = ["asynchronous", "database"]
+repository.workspace = true
+description = "Peripheral nervous system — infinite-db gateway and transport adapters."
+include = [
+    "Cargo.toml",
+    "src/**/*",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+]
+
+[features]
+default = ["ws"]
+ws = ["dep:tokio-tungstenite"]
+cli = []
+http = ["dep:axum"]
+
+[dependencies]
+bion-soma = { workspace = true, features = ["serde", "bridge"] }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+tokio-tungstenite = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

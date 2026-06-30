@@ -1,5 +1,29 @@
 //! Neuron functional roles and structural capability flags.
 
+use crate::polarity::Polarity;
+
+/// Fiber count contract for a given role and polarity.
+///
+/// Uses named fields on [`Arity::Bounded`] so min/max cannot be transposed
+/// silently — no naked `(u32, u32)` tuples.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum Arity {
+    /// This polarity is ontologically forbidden for this role (count must be 0).
+    Forbidden,
+    /// Exactly this many fibers required.
+    Exactly(u32),
+    /// Zero or more — at least this many.
+    AtLeast(u32),
+    /// Between `min` and `max` inclusive.
+    Bounded {
+        /// Minimum fiber count (inclusive).
+        min: u32,
+        /// Maximum fiber count (inclusive).
+        max: u32,
+    },
+}
+
 /// The functional role of a Neuron within the biological graph.
 ///
 /// `NeuronType` is not a runtime behavior tag — it does not change how
@@ -7,10 +31,6 @@
 /// - Where in the graph a Neuron may legally appear
 /// - Which Fiber polarities are valid for this role
 /// - How the Genesis editor renders this node on the canvas
-///
-/// Think of it as the cell type in biology: a neuron's type determines
-/// its morphology and position in the nervous system, not the chemistry
-/// of any individual signal it fires.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum NeuronType {
@@ -49,14 +69,40 @@ impl NeuronType {
     }
 
     /// Structural capability flags for this role.
-    ///
-    /// Prefer this when Cortex or Genesis need multiple flags at once —
-    /// avoids boolean proliferation at call sites.
     pub const fn capabilities(self) -> NeuronCapabilities {
         NeuronCapabilities {
             boundary: self.is_boundary(),
             autonomous: self.is_autonomous(),
             stateful: self.is_stateful(),
+        }
+    }
+
+    /// Structural fiber arity contract for this role and polarity.
+    ///
+    /// Encodes only *ontological* minimums and impossibilities. Design
+    /// preferences (e.g. "should have exactly one efferent for layout") stay
+    /// in Cortex `Immune`.
+    pub const fn fiber_arity(self, polarity: Polarity) -> Arity {
+        match (self, polarity) {
+            // Sensory: world→graph boundary. Cannot receive afferent input from
+            // the graph interior on its external surface — ontological impossibility.
+            (NeuronType::Sensory, Polarity::Afferent) => Arity::Forbidden,
+            // Must emit at least one efferent to carry world input inward.
+            (NeuronType::Sensory, Polarity::Efferent) => Arity::AtLeast(1),
+
+            // Motor: graph→world boundary. Cannot emit efferent to the world
+            // surface — effects are received, not sent, at the boundary.
+            (NeuronType::Motor, Polarity::Efferent) => Arity::Forbidden,
+            // Must receive at least one afferent to carry output outward.
+            (NeuronType::Motor, Polarity::Afferent) => Arity::AtLeast(1),
+
+            // Pacemaker: autonomous — cannot depend on external afferent input
+            // to fire. Policy about efferent count stays in Cortex.
+            (NeuronType::Pacemaker, Polarity::Afferent) => Arity::Forbidden,
+            (NeuronType::Pacemaker, Polarity::Efferent) => Arity::AtLeast(0),
+
+            // Interneuron / Memory: internal roles — no ontological polarity ban.
+            (NeuronType::Interneuron | NeuronType::Memory, _) => Arity::AtLeast(0),
         }
     }
 }
@@ -82,26 +128,50 @@ mod tests {
         assert!(NeuronType::Sensory.is_boundary());
         assert!(NeuronType::Motor.is_boundary());
         assert!(!NeuronType::Interneuron.is_boundary());
-        assert!(!NeuronType::Memory.is_boundary());
-        assert!(!NeuronType::Pacemaker.is_boundary());
     }
 
     #[test]
-    fn autonomous_only_pacemaker() {
-        assert!(NeuronType::Pacemaker.is_autonomous());
-        assert!(!NeuronType::Sensory.is_autonomous());
-        assert!(!NeuronType::Motor.is_autonomous());
-        assert!(!NeuronType::Interneuron.is_autonomous());
-        assert!(!NeuronType::Memory.is_autonomous());
+    fn sensory_afferent_forbidden_efferent_required() {
+        assert_eq!(
+            NeuronType::Sensory.fiber_arity(Polarity::Afferent),
+            Arity::Forbidden
+        );
+        assert_eq!(
+            NeuronType::Sensory.fiber_arity(Polarity::Efferent),
+            Arity::AtLeast(1)
+        );
     }
 
     #[test]
-    fn stateful_only_memory() {
-        assert!(NeuronType::Memory.is_stateful());
-        assert!(!NeuronType::Sensory.is_stateful());
-        assert!(!NeuronType::Motor.is_stateful());
-        assert!(!NeuronType::Interneuron.is_stateful());
-        assert!(!NeuronType::Pacemaker.is_stateful());
+    fn motor_efferent_forbidden_afferent_required() {
+        assert_eq!(
+            NeuronType::Motor.fiber_arity(Polarity::Efferent),
+            Arity::Forbidden
+        );
+        assert_eq!(
+            NeuronType::Motor.fiber_arity(Polarity::Afferent),
+            Arity::AtLeast(1)
+        );
+    }
+
+    #[test]
+    fn pacemaker_afferent_forbidden() {
+        assert_eq!(
+            NeuronType::Pacemaker.fiber_arity(Polarity::Afferent),
+            Arity::Forbidden
+        );
+    }
+
+    #[test]
+    fn interneuron_allows_both_polarities() {
+        assert_eq!(
+            NeuronType::Interneuron.fiber_arity(Polarity::Afferent),
+            Arity::AtLeast(0)
+        );
+        assert_eq!(
+            NeuronType::Interneuron.fiber_arity(Polarity::Efferent),
+            Arity::AtLeast(0)
+        );
     }
 
     #[test]

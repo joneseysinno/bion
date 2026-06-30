@@ -1,0 +1,25 @@
+[package]
+name = "bion-cns"
+version.workspace = true
+edition.workspace = true
+license = "MIT OR Apache-2.0"
+readme.workspace = true
+keywords = ["bion", "async", "graph", "reactive"]
+categories = ["asynchronous", "development-tools"]
+repository.workspace = true
+description = "Central nervous system — circuit execution engine."
+include = [
+    "Cargo.toml",
+    "src/**/*",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+]
+
+[dependencies]
+bion-soma = { workspace = true }
+bion-pns = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+async-trait = { workspace = true }
